@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>appserve</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<header id="topbar">
+	<div class="brand" id="brand">appserve</div>
+	<div class="crumbs" id="crumbs"></div>
+	<input type="text" id="pathInput" spellcheck="false" placeholder="パスを入力して Enter">
+	<button id="reloadBtn" title="再読み込み">⟳</button>
+	<button id="logBtn" title="ログを表示">ログ</button>
+</header>
+
+<main id="layout">
+	<nav id="tree" class="pane">
+		<div class="pane-title">場所</div>
+		<ul id="rootList" class="roots"></ul>
+		<div class="pane-title">ツリー</div>
+		<div id="treeBody"></div>
+	</nav>
+
+	<section id="listPane" class="pane">
+		<div class="list-head">
+			<span class="col col-name"  data-sort="name">名前</span>
+			<span class="col col-size"  data-sort="size">サイズ</span>
+			<span class="col col-mtime" data-sort="mtime">更新日時</span>
+		</div>
+		<div id="listBody" class="list-body"></div>
+		<div id="listStatus" class="status"></div>
+	</section>
+
+	<aside id="preview" class="pane">
+		<div class="pane-title">プレビュー</div>
+		<div id="previewMeta" class="meta"></div>
+		<div id="previewBody" class="preview-body">
+			<p class="hint">ファイルを選ぶと内容を表示します。</p>
+		</div>
+	</aside>
+</main>
+
+<div id="logPanel" class="hidden">
+	<div class="log-head">
+		<span>サーバログ</span>
+		<button id="logClose">閉じる</button>
+	</div>
+	<div id="logBody"></div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

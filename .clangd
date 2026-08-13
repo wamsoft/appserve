@@ -1,0 +1,8 @@
+CompileFlags:
+  Add:
+    - -std=c++17
+    - -ID:/test/appserve/include
+    - -ID:/test/appserve/src
+
+Diagnostics:
+  UnusedIncludes: None
