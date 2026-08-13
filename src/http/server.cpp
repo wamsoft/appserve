@@ -256,12 +256,14 @@ void HttpServer::stop()
 {
 	if (!running_.exchange(false)) return;
 
-	// listen を閉じて accept を解除する
+	// accept ループは running_ を 200ms 間隔で見ているので、先に join して
+	// から listen を閉じる。この順序なら「使用中のソケットを閉じる」競合が
+	// 起きないし、close が accept を起こしてくれるかどうかにも依存しない。
+	if (accept_thread_.joinable()) accept_thread_.join();
 	if (listen_ != APPSERVE_SOCK_INVALID) {
 		net::closeSocket(listen_);
 		listen_ = APPSERVE_SOCK_INVALID;
 	}
-	if (accept_thread_.joinable()) accept_thread_.join();
 
 	// 接続スレッドは detach しているので、抜けるのを少しだけ待つ。
 	// (SSE / ロングポーリングは running_ = false で自発的に終了する)
@@ -276,7 +278,28 @@ void HttpServer::stop()
 //---------------------------------------------------------------------------
 void HttpServer::acceptLoop()
 {
+	// accept() でそのままブロックせず、select() で短く待ちながら running_ を
+	// 見る。POSIX では listen ソケットを close() しても accept() でブロック中の
+	// スレッドが起きる保証が無く (Windows の closesocket とはここが違う)、
+	// 素直に書くと停止時に join で永久に待つことになる。
 	while (running_.load(std::memory_order_acquire)) {
+		sock_t ls = listen_;
+		if (ls == APPSERVE_SOCK_INVALID) break;
+
+		fd_set rfds;
+		FD_ZERO(&rfds);
+		FD_SET(ls, &rfds);
+		timeval tv;
+		tv.tv_sec  = 0;
+		tv.tv_usec = 200 * 1000;
+
+		int ready = ::select((int)ls + 1, &rfds, nullptr, nullptr, &tv);
+		if (ready == 0) continue;              // タイムアウト → running_ を再確認
+		if (ready < 0) {
+			if (!running_.load(std::memory_order_acquire)) break;
+			continue;                          // EINTR 等
+		}
+
 		sockaddr_in cli;
 		std::memset(&cli, 0, sizeof(cli));
 #ifdef _WIN32
@@ -284,7 +307,7 @@ void HttpServer::acceptLoop()
 #else
 		socklen_t clen = sizeof(cli);
 #endif
-		sock_t c = ::accept(listen_, (sockaddr*)&cli, &clen);
+		sock_t c = ::accept(ls, (sockaddr*)&cli, &clen);
 		if (c == APPSERVE_SOCK_INVALID) {
 			if (!running_.load(std::memory_order_acquire)) break;
 			continue;
