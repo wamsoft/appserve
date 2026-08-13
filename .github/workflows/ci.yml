@@ -1,9 +1,9 @@
 #---------------------------------------------------------------------------
 # CI — ビルドしてスモークテスト (実際に起動して API を叩く) まで通す
 #
-# Windows が主対象。Linux は移植性の見張り役として動かすが、まだ実機検証を
-# していないので continue-on-error にしてある (赤くても Windows の CI は止め
-# ない)。緑になったら continue-on-error を外すこと。
+# Windows / Linux とも必須。Linux は「POSIX 側のコードパスの見張り役」で、
+# 実際ここで停止時の accept ハング (close では accept が起きない POSIX 仕様)
+# を捕まえている。experimental を戻すときは matrix の値を変える。
 #---------------------------------------------------------------------------
 name: ci
 
@@ -23,7 +23,7 @@ jobs:
       matrix:
         include:
           - { name: windows, os: windows-latest, experimental: false }
-          - { name: linux,   os: ubuntu-latest,  experimental: true }
+          - { name: linux,   os: ubuntu-latest,  experimental: false }
 
     steps:
       - uses: actions/checkout@v4

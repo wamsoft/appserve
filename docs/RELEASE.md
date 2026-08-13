@@ -89,9 +89,13 @@ Run workflow** (`workflow_dispatch`) を使う。この場合パッケージは�
 
 ### Linux ビルドの扱い
 
-Linux は現状 **未検証**なので `continue-on-error: true` にしてある。
-落ちても Windows のリリースは公開される。緑になったのを確認したら
-`experimental: false` に変えて必須にすること。
+Windows / Linux とも必須 (`experimental: false`)。Linux は POSIX 側の
+コードパスの見張り役で、実際に「停止時の accept ハング」(POSIX では
+`close()` が `accept()` を起こさない) をここで捕まえている。
+
+一時的に落ちてもリリースを出したい OS があるときは、matrix の
+`experimental` を `true` にすればその OS の失敗が無視され、他の OS の
+成果物だけで公開される。
 
 ### バージョンの整合
 
