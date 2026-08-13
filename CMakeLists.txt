@@ -24,6 +24,10 @@ option(APPSERVE_BUILD_TESTS "Build tests" OFF)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AppserveEmbedWeb.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AppservePackage.cmake)
+
+# 配布パッケージのバージョン。リリース workflow がタグの値を -D で渡す。
+set(APPSERVE_VERSION "0.1.0" CACHE STRING "Version stamped into release packages")
 
 #---------------------------------------------------------------------------
 # appserve::core
@@ -91,6 +95,14 @@ if(APPSERVE_BUILD_APP)
     # web/ を zip 化して実行ファイルへ埋め込む。開発中はカレント/exe 隣の
     # web/ ディレクトリが優先されるので、埋め込みはリリース時のフォールバック。
     appserve_embed_web(appserve WEB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/web)
+
+    # 配布物 (zip / インストーラ) の設定。トップレベルビルドのときだけ。
+    if(APPSERVE_IS_TOP_LEVEL)
+        appserve_package(appserve
+            VERSION     ${APPSERVE_VERSION}
+            DESCRIPTION "Local file browser built on the appserve framework")
+        appserve_package_finalize()
+    endif()
 endif()
 
 if(APPSERVE_BUILD_TESTS)

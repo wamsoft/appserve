@@ -1,0 +1,77 @@
+#---------------------------------------------------------------------------
+# CI — ビルドしてスモークテスト (実際に起動して API を叩く) まで通す
+#
+# Windows が主対象。Linux は移植性の見張り役として動かすが、まだ実機検証を
+# していないので continue-on-error にしてある (赤くても Windows の CI は止め
+# ない)。緑になったら continue-on-error を外すこと。
+#---------------------------------------------------------------------------
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows, os: windows-latest, experimental: false }
+          - { name: linux,   os: ubuntu-latest,  experimental: true }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DAPPSERVE_BUILD_APP=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Locate the executable
+        id: exe
+        shell: bash
+        run: |
+          # 単一構成ジェネレータ (Linux) と多構成 (Windows/MSBuild) の両方に対応
+          for p in build/appserve build/appserve.exe \
+                   build/Release/appserve.exe build/Release/appserve; do
+            if [ -f "$p" ]; then echo "path=$p" >> "$GITHUB_OUTPUT"; exit 0; fi
+          done
+          echo "could not find the built executable:" && find build -maxdepth 2 -type f -name 'appserve*'
+          exit 1
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXE="${{ steps.exe.outputs.path }}"
+          # ブラウザは開かず、トークン無しで待ち受けさせる。
+          # idle-timeout=0 にしないと「接続が無い」と判断して自分で終了する。
+          "$EXE" --no-browser --port=18999 --no-token --idle-timeout=0 &
+          for i in $(seq 1 40); do
+            curl -sf http://127.0.0.1:18999/_app/info > /dev/null && break
+            sleep 0.25
+          done
+
+          echo "--- /_app/info ---"
+          curl -sf http://127.0.0.1:18999/_app/info
+
+          echo ""
+          echo "--- 埋め込み UI が配信できるか ---"
+          curl -sf -o /dev/null -w 'index.html %{http_code} %{size_download} bytes\n' \
+            http://127.0.0.1:18999/
+          curl -sf -o /dev/null -w 'appserve.js %{http_code} %{size_download} bytes\n' \
+            http://127.0.0.1:18999/lib/appserve.js
+
+          echo "--- ファイル API ---"
+          curl -sf "http://127.0.0.1:18999/api/fs/roots" > /dev/null && echo "fs/roots ok"
+
+          echo "--- REPL 経由で停止 ---"
+          curl -sf -X POST -d '.quit' http://127.0.0.1:18999/_app/repl
+          wait %1 || true

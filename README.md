@@ -145,6 +145,17 @@ localhost bind だけでは、同一マシンの他プロセスや悪意ある W
 - `/_app/*` と `/api/*` はトークン + `Origin` を検証する (静的 UI は素通し)
 - 既定 bind は `127.0.0.1`。それ以外を指定すると起動ログに警告が出る
 
+## 配布とリリース
+
+`appserve_package()` で zip / インストーラを作り、タグを打つと GitHub Actions が
+リリースを自動生成する。手順は [docs/RELEASE.md](docs/RELEASE.md) を参照。
+
+```bash
+cmake --build --preset windows-rel
+cpack --config build/windows/CPackConfig.cmake -C Release -B dist   # 手元で作る
+git tag v0.1.0 && git push origin v0.1.0                            # リリースする
+```
+
 ## ライセンス
 
 MIT
