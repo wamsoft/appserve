@@ -10,6 +10,10 @@
 #include <mutex>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace appserve {
 
 namespace {
@@ -21,6 +25,38 @@ std::mutex g_mu;                                   // sink 表 + ファイル出
 std::vector<std::pair<int, LogSink>> g_sinks;
 int          g_next_handle = 1;
 std::ofstream g_file;
+
+/// コンソールへ 1 行出す。
+///
+/// Windows のコンソールは既定で CP932 などのローカルコードページなので、
+/// UTF-8 のバイト列をそのまま fprintf すると化ける (日本語のパスや、
+/// メッセージ中の — のような記号)。コンソール宛てのときだけ UTF-16 に直して
+/// WriteConsoleW で書く。コードページを書き換えないので、同じウィンドウで
+/// 動いている他のプログラムに影響しない。
+void writeConsoleLine(const std::string& line)
+{
+#ifdef _WIN32
+	HANDLE h = ::GetStdHandle(STD_ERROR_HANDLE);
+	DWORD mode = 0;
+	if (h && h != INVALID_HANDLE_VALUE && ::GetConsoleMode(h, &mode)) {
+		int len = ::MultiByteToWideChar(CP_UTF8, 0, line.c_str(), (int)line.size(),
+		                                nullptr, 0);
+		if (len > 0) {
+			std::wstring w((size_t)len, L'\0');
+			::MultiByteToWideChar(CP_UTF8, 0, line.c_str(), (int)line.size(),
+			                      &w[0], len);
+			w += L'\n';
+			DWORD wrote = 0;
+			::WriteConsoleW(h, w.c_str(), (DWORD)w.size(), &wrote, nullptr);
+			return;
+		}
+	}
+	// リダイレクト先がファイルやパイプなら、UTF-8 のまま流す
+#endif
+	std::fwrite(line.data(), 1, line.size(), stderr);
+	std::fputc('\n', stderr);
+	std::fflush(stderr);
+}
 
 } // anonymous
 
@@ -71,11 +107,8 @@ void log(LogLevel lv, const std::string& line)
 		}
 	}
 
-	if (g_console.load(std::memory_order_relaxed)) {
-		const char* tag = logLevelName(lv);
-		std::fprintf(stderr, "[%s] %s\n", tag, line.c_str());
-		std::fflush(stderr);
-	}
+	if (g_console.load(std::memory_order_relaxed))
+		writeConsoleLine("[" + std::string(logLevelName(lv)) + "] " + line);
 
 	for (auto& s : sinks) {
 		if (s.second) s.second(lv, line);

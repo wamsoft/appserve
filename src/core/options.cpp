@@ -7,10 +7,39 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>          // CommandLineToArgvW
+#endif
 
 namespace appserve {
 
 namespace {
+
+#ifdef _WIN32
+/// Windows の argv は UTF-8 ではなく ANSI (日本語環境なら CP932) で渡ってくる。
+/// そのまま扱うと「D:/絵/画面.psd」のようなパスが開けないので、UTF-16 の
+/// コマンドラインから取り直して UTF-8 へ直す。取れなければ false (元の argv を使う)。
+bool wideArgs(std::vector<std::string>& out)
+{
+	int n = 0;
+	LPWSTR* w = ::CommandLineToArgvW(::GetCommandLineW(), &n);
+	if (!w) return false;
+	out.clear();
+	for (int i = 0; i < n; ++i) {
+		int len = ::WideCharToMultiByte(CP_UTF8, 0, w[i], -1, nullptr, 0, nullptr, nullptr);
+		if (len <= 1) { out.push_back(std::string()); continue; }
+		std::string s((size_t)len - 1, '\0');
+		::WideCharToMultiByte(CP_UTF8, 0, w[i], -1, &s[0], len, nullptr, nullptr);
+		out.push_back(s);
+	}
+	::LocalFree(w);
+	return true;
+}
+#endif
 
 /// "HOST:PORT" / "PORT" を解釈する (吉里吉里Z の -replweb と同じ書式)
 bool parseListen(const std::string& v, std::string& host, int& port)
@@ -93,8 +122,16 @@ bool App::parseArgs(int argc, char** argv)
 	Options& o = opt_;
 	exitCode_ = 0;
 
-	for (int i = 1; i < argc; ++i) {
-		std::string a = argv[i] ? argv[i] : "";
+	// 引数は UTF-8 として扱う。Windows だけは argv が ANSI なので取り直す。
+	std::vector<std::string> args;
+	for (int i = 0; i < argc; ++i) args.push_back(argv[i] ? argv[i] : "");
+#ifdef _WIN32
+	std::vector<std::string> wide;
+	if (wideArgs(wide) && wide.size() == args.size()) args.swap(wide);
+#endif
+
+	for (size_t i = 1; i < args.size(); ++i) {
+		const std::string& a = args[i];
 		if (a.empty()) continue;
 
 		// オプション以外は位置引数として貯める
