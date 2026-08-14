@@ -55,6 +55,19 @@ ReadResult readRequest(sock_t s, std::string& buf, Request& req, bool& keepAlive
 	req.query = (qpos == std::string::npos) ? std::string() : target.substr(qpos + 1);
 	req.path  = urlDecode(qpos == std::string::npos ? target : target.substr(0, qpos), false);
 
+	// 連続したスラッシュを 1 つに畳む。"//" や "/api//fs/list" のような URL は
+	// 実際に飛んでくる (相対パスの結合ミスなど) が、畳まないと prefix 一致にも
+	// 静的配信の相対パス化にも引っかからず 403/404 になってしまう。
+	{
+		std::string p;
+		p.reserve(req.path.size());
+		for (size_t i = 0; i < req.path.size(); ++i) {
+			if (req.path[i] == '/' && !p.empty() && p.back() == '/') continue;
+			p += req.path[i];
+		}
+		req.path.swap(p);
+	}
+
 	// --- ヘッダ ---
 	req.headers.clear();
 	size_t pos = lineEnd + 2;
