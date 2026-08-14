@@ -1,72 +1,75 @@
 # appserve
 
-ブラウザを UI とするローカルアプリのための、ミニマムな C++ フレームワーク。
+*[日本語版はこちら / Japanese version](README_ja.md)*
 
-- ローカル HTTP サーバとして起動し、自分にブラウザを接続させる
-- UI は HTML + JavaScript、ロジックは C++ 側の API
-- 派生アプリは本体を CMake で取り込み、独自 API + 独自 UI を足すだけ
-- AI コーディング前提の REPL / エージェント駆動機構を標準搭載
+A minimal C++ framework for local applications whose UI is a browser.
 
-依存は **標準ライブラリ + OS ソケットのみ**。vcpkg も FetchContent も不要で、
-CMake と C++17 コンパイラだけでビルドできる。
+- Starts as a local HTTP server and points a browser at itself
+- UI in HTML + JavaScript, logic in a C++ API
+- Derived apps pull this in with CMake and add their own API and UI
+- Ships with a REPL and agent-driving machinery, built for AI-assisted coding
 
-設計の詳細は [docs/DESIGN.md](docs/DESIGN.md)、エージェント駆動は
-[docs/REPL.md](docs/REPL.md) を参照。
+The only dependencies are **the standard library and OS sockets**. No vcpkg, no
+FetchContent — CMake and a C++17 compiler are enough.
+
+See [docs/DESIGN.md](docs/DESIGN.md) for the design and
+[docs/REPL.md](docs/REPL.md) for agent driving (both in Japanese).
 
 ---
 
-## ビルド
+## Building
 
 ```bash
-cmake --preset windows          # MSVC (Developer Command Prompt から)
+cmake --preset windows          # MSVC (from a Developer Command Prompt)
 cmake --build --preset windows  # Debug
 cmake --build --preset windows-rel
 ```
 
-Linux / macOS は `--preset linux` (または素の `cmake -B build`)。
+Linux and macOS use `--preset linux` (or plain `cmake -B build`).
 
-## 起動
+## Running
 
 ```bash
-appserve                    # ブラウザが --app モードで開く
-appserve D:/work            # 起動時に開くパスを指定
+appserve                    # a browser opens in app mode
+appserve D:/work            # open at a given path
 appserve --port=8899 --no-browser
-appserve --repl             # stdin 対話 REPL つき
+appserve --repl             # with an interactive REPL on stdin
 ```
 
-主なオプション (全ては `appserve --help`):
+Main options (`appserve --help` lists them all):
 
 | | |
 |---|---|
-| `--host=ADDR` `--port=N` | bind 先。既定は `127.0.0.1` + ポート自動割当 |
-| `--web-root=PATH` | UI のディレクトリ / zip を明示指定 |
-| `--browser=app\|default\|none` | ブラウザ起動方式 (既定 `app`) |
-| `--idle-timeout=SEC` | 接続 0 が続いたら終了 (既定 10 秒、`0` で無効) |
-| `--repl` / `--replfile=DIR` | REPL チャネル |
-| `--root=DIR` / `--allow-write` | ファイル API の許可範囲 |
-| `--no-token` | トークン検証を切る (開発用) |
+| `--host=ADDR` `--port=N` | Bind address. Defaults to `127.0.0.1` and an automatically chosen port |
+| `--web-root=PATH` | Serve the UI from a specific directory or zip |
+| `--browser=app\|default\|none` | How to open the browser (default `app`) |
+| `--idle-timeout=SEC` | Exit after no browser has been connected for SEC (default 10, `0` disables) |
+| `--repl` / `--replfile=DIR` | REPL channels |
+| `--root=DIR` / `--allow-write` | Scope of the file API |
+| `--no-token` | Turn off token checks (development only) |
 
-ブラウザは Edge → Chrome を `--app=<url>` で試し、いずれも起動できなければ
-OS 既定のブラウザにフォールバックする。ブラウザを閉じるとセッションが切れ、
-`--idle-timeout` 秒後にプロセスが自動終了する (プロセスが残らない)。
+The browser is launched as Edge → Chrome with `--app=<url>`; if neither can be
+started it falls back to the OS default browser. Closing the browser ends the
+session, and the process exits `--idle-timeout` seconds later, so nothing is left
+running.
 
-## UI アセットの解決順
+## How the UI assets are resolved
 
 ```
 1. --web-root=PATH
-2. カレントディレクトリの web/       ← 開発中はこれが勝つ
-3. 実行ファイル隣の web/
-4. 実行ファイル隣の <exe名>.zip / web.zip
-5. 実行ファイルに埋め込まれた zip     ← リリース時の単一 exe
+2. web/ in the current directory        ← wins during development
+3. web/ next to the executable
+4. <exe name>.zip / web.zip next to the executable
+5. a zip embedded in the executable     ← a single-file release
 ```
 
-開発中は `web/` を編集してブラウザをリロードするだけで反映される。
-リリース時は `appserve_embed_web()` が `web/` を zip 化して exe に埋め込むので、
-exe 1 つで配布できる。解決結果は REPL の `.web` で確認できる。
+During development you edit `web/` and reload the browser. For a release,
+`appserve_embed_web()` packs `web/` into a zip inside the executable, so it ships
+as one file. The REPL command `.web` reports which of these was used.
 
 ---
 
-## 派生アプリの作り方
+## Writing a derived app
 
 ```cpp
 // psdapp/psd_module.cpp
@@ -77,8 +80,8 @@ public:
 	const char* name() const override { return "psd"; }
 
 	void registerApi(appserve::ApiRegistry& reg) override {
-		// Affinity::Main = メインスレッドで直列実行 (既定)。
-		// スレッドセーフでない C++ ライブラリをそのまま API 化できる。
+		// Affinity::Main (the default) runs the handler serialised on the main
+		// thread, so a C++ library that is not thread-safe can be exposed as-is.
 		reg.route("/api/psd/open", appserve::Affinity::Main, [this](const auto& r) {
 			doc_ = psdparse::open(r.json()["path"].asStr());
 			return appserve::Response::json(describe(*doc_));
@@ -99,7 +102,7 @@ int main(int argc, char** argv) {
 	appserve::App app;
 	app.options().appName = "PSD Inspector";
 	if (!app.parseArgs(argc, argv)) return app.exitCode();
-	app.addModule(appserve::makeFsModule());        // 標準のファイル API を再利用
+	app.addModule(appserve::makeFsModule());        // reuse the standard file API
 	app.addModule(std::make_unique<PsdModule>());
 	return app.run();
 }
@@ -112,7 +115,7 @@ target_link_libraries(psdapp PRIVATE appserve::core psdparse)
 appserve_embed_web(psdapp WEB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/web)
 ```
 
-UI 側は `web/lib/appserve.js` (本体からコピー) を使う:
+The UI side uses `web/lib/appserve.js` (copied from here):
 
 ```js
 import { app } from './lib/appserve.js';
@@ -120,42 +123,44 @@ import { app } from './lib/appserve.js';
 await app.ready();
 const doc = await app.post('/api/psd/open', { path: file });
 
-app.command('reload', () => refresh());          // REPL の .b call reload から呼べる
-app.exposeState(() => ({ file, layers: doc.layers.length }));  // .b state から見える
-app.on('progress', d => bar.value = d.pct);      // サーバの broadcast("progress", …)
+app.command('reload', () => refresh());          // callable as .b call reload
+app.exposeState(() => ({ file, layers: doc.layers.length }));  // visible to .b state
+app.on('progress', d => bar.value = d.pct);      // from broadcast("progress", …)
 ```
 
-`appserve.js` がトークン付与・セッション管理・ロングポーリング・SSE・
-離脱通知をすべて内包するので、アプリ側は `get` / `post` / `command` /
-`exposeState` だけ意識すればよい。UI フレームワークは不問。
+`appserve.js` takes care of the token, session handling, long polling, SSE and the
+leave notification, so an app only deals with `get` / `post` / `command` /
+`exposeState`. Any UI framework — or none — works.
 
-動的プラグイン (DLL) で API を足す場合は
-[`include/appserve/plugin_abi.h`](include/appserve/plugin_abi.h) を参照。
+To add API from a dynamic plugin (DLL), see
+[`include/appserve/plugin_abi.h`](include/appserve/plugin_abi.h).
 
 ---
 
-## セキュリティ
+## Security
 
-localhost bind だけでは、同一マシンの他プロセスや悪意ある Web ページ
-(CSRF / DNS rebinding) からローカルファイル API を叩けてしまう。そのため:
+Binding to localhost alone is not enough: other processes on the same machine, and
+malicious web pages (CSRF / DNS rebinding), could otherwise reach the local file
+API. So:
 
-- 起動時に 128bit のトークンを生成し、ブラウザには `?t=<token>` で渡す
-- `appserve.js` が `sessionStorage` へ退避して URL からは消し、以降の
-  全リクエストに `X-App-Token` を付ける
-- `/_app/*` と `/api/*` はトークン + `Origin` を検証する (静的 UI は素通し)
-- 既定 bind は `127.0.0.1`。それ以外を指定すると起動ログに警告が出る
+- A 128-bit token is generated at startup and handed to the browser as `?t=<token>`
+- `appserve.js` moves it into `sessionStorage`, strips it from the URL, and sends
+  it as `X-App-Token` on every request
+- `/_app/*` and `/api/*` verify the token and the `Origin` header (static UI files
+  are served without a check)
+- The default bind address is `127.0.0.1`; anything else logs a warning at startup
 
-## 配布とリリース
+## Packaging and releases
 
-`appserve_package()` で zip / インストーラを作り、タグを打つと GitHub Actions が
-リリースを自動生成する。手順は [docs/RELEASE.md](docs/RELEASE.md) を参照。
+`appserve_package()` builds the zip and the installer, and pushing a tag makes
+GitHub Actions publish a release. See [docs/RELEASE.md](docs/RELEASE.md) (Japanese).
 
 ```bash
 cmake --build --preset windows-rel
-cpack --config build/windows/CPackConfig.cmake -C Release -B dist   # 手元で作る
-git tag v0.1.0 && git push origin v0.1.0                            # リリースする
+cpack --config build/windows/CPackConfig.cmake -C Release -B dist   # build locally
+git tag v0.1.0 && git push origin v0.1.0                            # publish
 ```
 
-## ライセンス
+## License
 
 MIT
