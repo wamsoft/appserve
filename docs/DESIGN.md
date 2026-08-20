@@ -64,7 +64,7 @@
 
 | スレッド | 役割 |
 |---|---|
-| main | `App::run()`。タスクキュー drain / アイドル監視 / シャットダウン |
+| main | `App::run()`。タスクキュー drain / アイドル監視 / シャットダウン。ホストが自前のループを持つ場合は `startServer()` + 毎フレーム `pump(0)` + `stopServer()` に分けて、そのホストのスレッドが main になる |
 | accept | listen ソケットの `accept` ループ |
 | conn × N | 接続 1 本 = 1 スレッド。keep-alive のあいだ保持。SSE/ロングポーリングもここ |
 | repl（任意）| stdin 読取 or ファイルチャネル監視 |
@@ -305,6 +305,21 @@ SessionMgr:
   （プロセスが残らない）
 - `--idle-timeout=0` で無効化（開発中・REPL 常駐時に使う）
 - REPL がアタッチされている間は自動終了を抑止（`--repl` / `--replfile` 時）
+
+逆向き（サーバが終わったらブラウザも畳む）も自動:
+
+```
+正常終了:   stopServer() が畳む直前に shutdown コマンドを push
+              → 待機中の /_app/poll が即座に持ち帰り、appserve.js が窓を閉じる
+              → 配送のため約 150ms だけ待ってからソケットを閉じる
+強制終了:   予告が飛ばないので、appserve.js が到達不能を検出して閉じる
+              （disconnect_grace = 6s。一時的な通信断で閉じないための猶予。
+                HTTP エラーはサーバが生きている証拠なので数えない）
+```
+
+- どちらも `Appserve._lost()` に集約。`onDisconnected()` で購読できる
+- `exitOnDisconnect = false` で opt-out（`app.ready()` の前に立てる）
+- 窓を閉じられない文脈（自分で開いたタブ）は「終了しました」画面に差し替える
 
 ---
 
