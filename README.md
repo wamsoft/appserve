@@ -53,6 +53,13 @@ started it falls back to the OS default browser. Closing the browser ends the
 session, and the process exits `--idle-timeout` seconds later, so nothing is left
 running.
 
+**The reverse is automatic too**: when the server exits, the browser window closes.
+A normal shutdown pushes a notice so it closes at once; after a kill or a crash the
+client notices the dead connection and closes a few seconds later. This is what
+keeps a dead UI from lingering — set `app.exitOnDisconnect = false` before
+`app.ready()` to opt out. Where a window cannot be closed by script (a tab you
+opened yourself), the page is replaced with a "closed" screen instead.
+
 ## How the UI assets are resolved
 
 ```
@@ -134,6 +141,25 @@ leave notification, so an app only deals with `get` / `post` / `command` /
 
 To add API from a dynamic plugin (DLL), see
 [`include/appserve/plugin_abi.h`](include/appserve/plugin_abi.h).
+
+### Embedding in a host that owns its main loop
+
+`run()` blocks, which does not suit an app built around SDL or a game loop.
+The same sequence is available split in three, so the host keeps the loop:
+
+```cpp
+if (!app.startServer()) return app.exitCode();
+while (app.serving()) {
+	render_one_frame();
+	app.pump(0);        // run pending Affinity::Main handlers, no waiting
+}
+return app.stopServer();
+```
+
+`pump()` runs `Affinity::Main` handlers **on the calling thread**, so call it
+from the same thread that called `startServer()` — the host's main thread. That
+is what lets an API handler touch a non-thread-safe library (or the renderer)
+directly.
 
 ---
 

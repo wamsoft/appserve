@@ -87,6 +87,10 @@ channel it is not, so a bare `appserve --no-browser` exits by itself after
 | conn × N | one thread per connection, kept for keep-alive; SSE and long-poll block here |
 | repl | stdin reader and/or file-channel poller |
 
+`run()` is `startServer()` + `while (serving()) pump(200)` + `stopServer()`. A host with its
+own loop (SDL, a game loop) calls those three itself and drives `pump(0)` per frame; the
+"main thread" is then whichever thread called `startServer()`.
+
 Handlers registered with `Affinity::Main` (the default) are pushed onto `TaskQueue` by the
 connection thread, which blocks until the main loop runs them — that is what makes it safe to
 expose a non-thread-safe C++ library as an API. `Affinity::Any` runs inline on the connection
@@ -117,6 +121,12 @@ normal response writer.
 A session is one browser tab, created by `/_app/hello`, kept alive by poll/SSE/hb, killed by
 `/_app/bye` (sent via `pagehide`) or by `sessionTtl`. Auto-exit fires when startup grace has
 passed, zero sessions are alive for `idleTimeout`, and no REPL is attached.
+
+Shutdown is symmetric: `stopServer()` posts a `shutdown` browser command (and pauses ~150ms
+for it to be delivered) so the window closes immediately; if the process dies without that,
+`appserve.js` declares the server lost after `disconnectGraceMs` of unreachable polls and
+closes itself. Both paths end in `Appserve._lost()`, which is also where `onDisconnected()`
+listeners run. `exitOnDisconnect = false` opts a page out.
 
 ### UI asset resolution (`src/webroot/`)
 

@@ -52,6 +52,12 @@ appserve --repl             # stdin 対話 REPL つき
 OS 既定のブラウザにフォールバックする。ブラウザを閉じるとセッションが切れ、
 `--idle-timeout` 秒後にプロセスが自動終了する (プロセスが残らない)。
 
+**逆も自動**で、サーバが終了するとブラウザの窓も閉じる。正常終了時は終了予告を
+push するので即座に、強制終了 (kill / クラッシュ) のときは通信断を検出して
+数秒後に閉じる。死んだ UI が残らないようにするための挙動で、切りたい場合は
+`app.ready()` の前に `app.exitOnDisconnect = false` を立てる。閉じられない
+文脈 (自分で開いたタブなど) では、代わりに「終了しました」の画面になる。
+
 ## UI アセットの解決順
 
 ```
@@ -133,6 +139,24 @@ app.on('progress', d => bar.value = d.pct);      // サーバの broadcast("prog
 
 動的プラグイン (DLL) で API を足す場合は
 [`include/appserve/plugin_abi.h`](include/appserve/plugin_abi.h) を参照。
+
+### 自前のメインループを持つホストへ組み込む
+
+`run()` はブロックするので、SDL やゲームループを持つアプリには使えない。
+同じ流れを 3 つに割ったものが用意してあり、ループはホスト側が握れる:
+
+```cpp
+if (!app.startServer()) return app.exitCode();
+while (app.serving()) {
+	render_one_frame();
+	app.pump(0);        // 溜まった Affinity::Main ハンドラを実行 (待たない)
+}
+return app.stopServer();
+```
+
+`pump()` は `Affinity::Main` のハンドラを**呼んだスレッドで**実行するので、
+`startServer()` と同じスレッド (ホストのメインスレッド) から呼ぶこと。これに
+より、API ハンドラからスレッドセーフでないライブラリや描画側を直接触れる。
 
 ---
 

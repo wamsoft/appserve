@@ -12,6 +12,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstring>
+#include <thread>
 
 namespace appserve {
 
@@ -481,11 +482,26 @@ bool App::Impl::shouldAutoExit(size_t aliveSessions) const
 }
 
 //---------------------------------------------------------------------------
-// 起動
+// 起動 — startServer / pump / stopServer と、その合成である run()
+//
+// run() は「起動 → ループ → 終了」を丸ごと引き受けるが、SDL や既存ゲームの
+// ように**自前のメインループを手放せないホスト**には使えない。そこで中身を
+// 3 つに割り、ホストのループから pump() を毎フレーム呼ぶ形も選べるようにして
+// ある (elements_console のような組込みホスト用):
+//
+//     if (!app.startServer()) return 1;
+//     while (app.serving()) { ...1 フレーム分の描画...; app.pump(0); }
+//     return app.stopServer();
+//
+// pump() は Affinity::Main のハンドラを**呼んだスレッドで**実行する。
+// startServer() を呼んだスレッド (= ホストのメインスレッド) から回すこと。
+// そうすればスレッドセーフでないライブラリをホストのメインスレッドのまま
+// API 化できる — run() を使う場合と同じ保証になる。
 //---------------------------------------------------------------------------
-int App::run()
+bool App::startServer()
 {
 	Impl& d = *impl_;
+	if (d.started) return false;              // 二重起動は弾く
 	d.queue.bindMainThread();
 	d.startMs      = util::nowMs();
 	d.lastActiveMs = d.startMs;
@@ -537,7 +553,8 @@ int App::run()
 	if (!ok) {
 		logE("failed to start the HTTP server");
 		d.uninstallLogSink();
-		return 1;
+		d.exitCode.store(1, std::memory_order_relaxed);
+		return false;
 	}
 	d.running.store(true, std::memory_order_release);
 
@@ -569,20 +586,54 @@ int App::run()
 		}
 	}
 
-	// --- メインループ ---
-	while (d.running.load(std::memory_order_acquire)) {
-		d.queue.drain(200);
-		size_t alive = d.sessions.reap(opt_.sessionTtl);
-		if (alive > 0) d.lastActiveMs = util::nowMs();
-		if (d.shouldAutoExit(alive)) {
-			logI("no browser connected — shutting down");
-			requestShutdown(0);
-		}
-	}
+	d.started = true;
+	return true;
+}
 
-	// --- 終了 ---
+//---------------------------------------------------------------------------
+// メインループ 1 周分。waitMs はキューが空のときの待ち時間 (ms)。ホストの
+// ループに埋め込むときは 0 (待たない) を渡す。
+//---------------------------------------------------------------------------
+void App::pump(int waitMs)
+{
+	Impl& d = *impl_;
+	if (!d.started) return;
+	d.queue.drain(waitMs);
+	size_t alive = d.sessions.reap(opt_.sessionTtl);
+	if (alive > 0) d.lastActiveMs = util::nowMs();
+	if (d.shouldAutoExit(alive)) {
+		logI("no browser connected — shutting down");
+		requestShutdown(0);
+	}
+}
+
+bool App::serving() const
+{
+	return impl_->running.load(std::memory_order_acquire);
+}
+
+//---------------------------------------------------------------------------
+// 終了処理。startServer() していなければ何もしない (exitCode だけ返す)。
+//---------------------------------------------------------------------------
+int App::stopServer()
+{
+	Impl& d = *impl_;
+	if (!d.started) return d.exitCode.load(std::memory_order_relaxed);
+	d.started = false;
+	d.running.store(false, std::memory_order_release);
+
 	logD("shutting down");
 	d.repl->stop();
+
+	// ブラウザに「終了する」と伝えてから畳む。appserve.js はこれを受けて窓を
+	// 閉じる。伝えないと、死んだ UI が残ったまま通信断の検出 (数秒) を待つ
+	// ことになる。積んだコマンドは待機中の /_app/poll が即座に持ち帰るので、
+	// その配送が抜けるだけの間を置いてからソケットを閉じる。
+	if (d.sessions.count() > 0) {
+		d.browser.post("shutdown");
+		std::this_thread::sleep_for(std::chrono::milliseconds(150));
+	}
+
 	d.sessions.closeAll();
 	d.sessions.closeAllSse();
 	d.server.stop();
@@ -601,6 +652,17 @@ int App::run()
 
 	g_signal_target = nullptr;
 	return d.exitCode.load(std::memory_order_relaxed);
+}
+
+//---------------------------------------------------------------------------
+// 自前でループを回す通常の起動 (単体アプリはこれを使う)
+//---------------------------------------------------------------------------
+int App::run()
+{
+	if (!startServer()) return impl_->exitCode.load(std::memory_order_relaxed);
+	while (serving())
+		pump(200);
+	return stopServer();
 }
 
 //---------------------------------------------------------------------------

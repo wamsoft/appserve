@@ -37,6 +37,7 @@ struct App::Impl {
 	std::unique_ptr<Repl>                 repl;
 	std::unique_ptr<PluginLoader>         plugins;
 
+	bool              started = false;    ///< startServer() 済み (stopServer で false)
 	std::atomic<bool> running{false};
 	std::atomic<int>  exitCode{0};
 	int64_t           startMs = 0;

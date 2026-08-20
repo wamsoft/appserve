@@ -103,6 +103,29 @@ public:
 	/// サーバを起動し、終了までブロックする。戻り値がプロセス終了コード。
 	int run();
 
+	// --- ホストのメインループへ組み込む形 (run() の 3 分割) ---
+	//
+	// SDL のように自前のループを手放せないアプリ向け。run() と同じ順序で
+	// 動くので、挙動の差はループを誰が回すかだけ:
+	//
+	//     if (!app.startServer()) return 1;
+	//     while (app.serving()) { ...1 フレーム描画...; app.pump(0); }
+	//     return app.stopServer();
+	//
+	// pump() は Affinity::Main のハンドラを**呼んだスレッドで**実行するので、
+	// startServer() と同じスレッド (ホストのメインスレッド) から回すこと。
+
+	/// サーバ起動 (モジュール登録 → listen → REPL → ブラウザ → onStart)。
+	/// false = 起動失敗。終了コードは exitCode()。
+	bool startServer();
+	/// メインループ 1 周分 (タスク実行 + セッション回収 + 自動終了判定)。
+	/// waitMs = キューが空のときの待ち時間。組込み時は 0。
+	void pump(int waitMs = 0);
+	/// サーバが動作中か (requestShutdown / 自動終了で false になる)
+	bool serving() const;
+	/// 終了処理。戻り値がプロセス終了コード。startServer() 前なら何もしない。
+	int  stopServer();
+
 	/// 終了を要求する (任意スレッドから可)
 	void requestShutdown(int code = 0);
 
